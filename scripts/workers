@@ -3,6 +3,9 @@
 #
 # Usage: ./scripts/workers
 #
+
+sleep 10
+
 source ./scripts/load-config
 
 run_resque=1

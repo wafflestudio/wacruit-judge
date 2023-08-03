@@ -3,6 +3,9 @@
 #
 # Usage: ./scripts/server
 #
+
+sleep 10
+
 for i in $(seq 1 $RESTART_MAX_TRIES); do
     source ./scripts/load-config
 
