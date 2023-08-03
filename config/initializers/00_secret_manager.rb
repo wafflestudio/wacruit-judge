@@ -13,6 +13,8 @@ def set_aws_managed_secrets
   # region name
   region_name = 'ap-northeast-2'
 
+  puts "Fetching secrets from AWS Secrets Manager: #{secret_name}, env: #{ENV['RAILS_ENV']}"
+
   begin
     client = Aws::SecretsManager::Client.new(region: region_name)
     get_secret_value_response = client.get_secret_value(secret_id: secret_name)
