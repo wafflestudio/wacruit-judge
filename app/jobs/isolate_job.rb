@@ -15,23 +15,32 @@ class IsolateJob < ApplicationJob
               :stderr_file, :metadata_file, :additional_files_archive_file
 
   def perform(submission_id)
+    puts "Entering perform method with submission_id: #{submission_id}"
     @submission = Submission.find(submission_id)
+    puts "Found submission: #{@submission.inspect}"
+
     submission.update(status: Status.process, started_at: DateTime.now, execution_host: ENV["HOSTNAME"])
+    puts "Submission updated with status: #{submission.status}"
 
     time = []
     memory = []
 
-    submission.number_of_runs.times do
+    submission.number_of_runs.times do |i|
+      puts "Starting run number: #{i + 1}"
       initialize_workdir
       if compile == :failure
+        puts "Compilation failed during run number: #{i + 1}"
         cleanup
         return
       end
+      puts "Running code..."
       run
+      puts "Verifying..."
       verify
 
       time << submission.time
       memory << submission.memory
+      puts "Time and memory after run #{i + 1}: #{time.inspect}, #{memory.inspect}"
 
       cleanup
       break if submission.status != Status.ac
@@ -39,13 +48,22 @@ class IsolateJob < ApplicationJob
 
     submission.time = time.inject(&:+).to_f / time.size
     submission.memory = memory.inject(&:+).to_f / memory.size
-    submission.save
+    puts "Averages: time: #{submission.time}, memory: #{submission.memory}"
 
-  rescue Exception => e
+    begin
+      submission.save!
+      puts "Submission saved"
+    rescue Exception => e
+      puts "Failed to save submission with error: #{e.class} #{e.message}"
+    end
+
+  rescue => e
+    puts "Rescue block entered with exception: #{e.class} #{e.message}"
     raise e.message unless submission
     submission.update(message: e.message, status: Status.boxerr, finished_at: DateTime.now)
     cleanup(raise_exception = false)
   ensure
+    puts "In the ensure block, calling the callback"
     call_callback
   end
 
@@ -251,36 +269,53 @@ class IsolateJob < ApplicationJob
     `sudo chown $(whoami): #{run_script} && rm #{run_script}` unless submission.is_project
   end
 
+  def truncate_middle(input, length = 50, replacement = '...')
+    return input if input.length <= length
+  
+    part_length = (length - replacement.length) / 2
+    input[0...part_length] + replacement + input[-part_length..-1]
+  end
+
   def verify
+    puts "Entering verify method"
+    
     submission.finished_at = DateTime.now
-
+    puts "Set submission.finished_at: #{submission.finished_at}"
+  
     metadata = get_metadata
-
+    puts "Got metadata: #{metadata}"
+  
     program_stdout = File.read(stdout_file)
     program_stdout = nil if program_stdout.empty?
-
+    puts "Read truncated program_stdout: #{truncate_middle(program_stdout)}"
+  
     program_stderr = File.read(stderr_file)
     program_stderr = nil if program_stderr.empty?
-
+    puts "Read program_stderr: #{program_stderr}"
+  
     submission.time = metadata[:time]
     submission.wall_time = metadata[:"time-wall"]
     submission.memory = (cgroups.present? ? metadata[:"cg-mem"] : metadata[:"max-rss"])
+    puts "Set submission.time, wall_time, and memory: #{submission.time}, #{submission.wall_time}, #{submission.memory}"
+  
     submission.stdout = program_stdout
     submission.stderr = program_stderr
+  
     submission.exit_code = metadata[:exitcode].try(:to_i) || 0
     submission.exit_signal = metadata[:exitsig].try(:to_i)
+    puts "Set submission.exit_code and exit_signal: #{submission.exit_code}, #{submission.exit_signal}"
+  
     submission.message = metadata[:message]
     submission.status = determine_status(metadata[:status], submission.exit_signal)
+    puts "Set submission.message and status: #{submission.message}, #{submission.status}"
 
-    # After adding support for compiler_options and command_line_arguments
-    # status "Exec Format Error" will no longer occur because compile and run
-    # is done inside a dynamically created bash script, thus isolate doesn't call
-    # execve directily on submission.language.compile_cmd or submission.langauge.run_cmd.
-    # Consequence of running compile and run through bash script is that when
-    # target binary is not found then submission gets status "Runtime Error (NZEC)".
-    #
-    # I think this is for now O.K. behaviour, but I will leave this if block
-    # here until I am 100% sure that "Exec Format Error" can be deprecated.
+    # In case of runtime error, we don't want to show the program's output
+    # for the sake of disk space and bandwidth.
+    runtime_errors = [7, 8, 9, 10, 11, 12]
+    if runtime_errors.include?(submission.status.id)
+      submission.stdout = nil
+    end
+  
     if submission.status == Status.boxerr &&
        (
          submission.message.to_s.match(/^execve\(.+\): Exec format error$/) ||
@@ -289,6 +324,8 @@ class IsolateJob < ApplicationJob
        )
        submission.status = Status.exeerr
     end
+    
+    puts "Final submission.status: #{submission.status}"
   end
 
   def cleanup(raise_exception = true)
