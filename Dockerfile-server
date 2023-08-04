@@ -31,5 +31,8 @@ LABEL version=$JUDGE0_VERSION
 ARG RAILS_ENV
 ENV RAILS_ENV=$RAILS_ENV
 
+ARG WORKER_COUNT
+ENV COUNT=$WORKER_COUNT
+
 ENTRYPOINT ["/api/docker-entrypoint.sh"]
 CMD ["/api/scripts/server"]

@@ -55,4 +55,4 @@ jobs:
           build-args: |
             COMPILER_IMAGE=${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_COMPILERS }}:${{ env.IMAGE_TAG_COMPILERS }}
             RAILS_ENV=${{ env.RAILS_ENV }}
-            
+            WORKER_COUNT=1
